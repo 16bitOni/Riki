@@ -5,3 +5,4 @@ data/
 secrets/
 .pytest_cache/
 docs/
+riki.pem

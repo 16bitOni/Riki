@@ -1,0 +1,4 @@
+[
+  {"query": "Where does my sister work?", "expect": ["Acme"]},
+  {"query": "Where should I go to focus this weekend?", "expect": ["quiet cafes"]}
+]

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Personal Agent</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f6f6f4; color: #1a1a1a; }
+  main { max-width: 720px; margin: 0 auto; height: 100vh; display: flex; flex-direction: column; padding: 16px; box-sizing: border-box; }
+  header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  header button, header input { font: inherit; padding: 4px 8px; }
+  #log { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .msg { padding: 10px 14px; border-radius: 12px; max-width: 85%; white-space: pre-wrap; line-height: 1.45; }
+  .user { align-self: flex-end; background: #1a1a1a; color: #fff; }
+  .assistant { align-self: flex-start; background: #fff; border: 1px solid #ddd; }
+  form { display: flex; gap: 8px; margin-top: 12px; }
+  textarea { flex: 1; font: inherit; padding: 10px; border-radius: 10px; border: 1px solid #ccc; resize: none; }
+  form button { font: inherit; padding: 0 18px; border-radius: 10px; border: 0; background: #1a1a1a; color: #fff; cursor: pointer; }
+  .msg.typing::after { content: ""; display: inline-block; width: 7px; height: 1.1em; margin-left: 2px;
+    vertical-align: text-bottom; background: currentColor; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  form button:disabled { opacity: .5; cursor: wait; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <strong>Personal Agent</strong>
+    <span>
+      <input id="key" type="password" placeholder="API key (if set)" size="14">
+      <button id="new">New chat</button>
+    </span>
+  </header>
+  <div id="log"></div>
+  <form id="form">
+    <textarea id="text" rows="2" placeholder="Message… (Enter to send, Shift+Enter for new line)"></textarea>
+    <button id="send">Send</button>
+  </form>
+</main>
+<script>
+  let conversationId = null;
+  const log = document.getElementById("log");
+  const text = document.getElementById("text");
+  const send = document.getElementById("send");
+
+  function add(role, content) {
+    const div = document.createElement("div");
+    div.className = "msg " + role;
+    div.textContent = content;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    return div;
+  }
+
+  async function ask(message, bubble) {
+    const headers = { "Content-Type": "application/json" };
+    const key = document.getElementById("key").value;
+    if (key) headers["X-API-Key"] = key;
+    const response = await fetch("/chat/stream", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ message, conversation_id: conversationId }),
+    });
+    if (!response.ok) throw new Error((await response.text()) || response.status);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let streamed = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let end;
+      while ((end = buffer.indexOf("\n\n")) >= 0) {
+        const line = buffer.slice(0, end).replace(/^data: /, "");
+        buffer = buffer.slice(end + 2);
+        const event = JSON.parse(line);
+        if (event.error) throw new Error(event.error);
+        if (event.token) {
+          streamed += event.token;
+          bubble.textContent = streamed;
+          log.scrollTop = log.scrollHeight;
+        }
+        if (event.done) {
+          conversationId = event.conversation_id;
+          bubble.textContent = event.reply; // the saved reply is the source of truth
+        }
+      }
+    }
+  }
+
+  document.getElementById("form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const message = text.value.trim();
+    if (!message) return;
+    text.value = "";
+    add("user", message);
+    const bubble = add("assistant", "");
+    bubble.classList.add("typing");
+    send.disabled = true;
+    try {
+      await ask(message, bubble);
+    } catch (error) {
+      bubble.textContent = "Error: " + error.message;
+    }
+    bubble.classList.remove("typing");
+    send.disabled = false;
+    text.focus();
+  });
+
+  text.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      document.getElementById("form").requestSubmit();
+    }
+  });
+
+  document.getElementById("new").addEventListener("click", () => {
+    conversationId = null;
+    log.innerHTML = "";
+  });
+</script>
+</body>
+</html>
